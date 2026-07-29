@@ -1,5 +1,7 @@
 # dpull
 
+[![Beta Release](https://github.com/imythu/dpull/actions/workflows/beta-release.yml/badge.svg)](https://github.com/imythu/dpull/actions/workflows/beta-release.yml)
+
 `dpull` 是一个面向代理网络、Compose 项目和重复部署场景的 `docker pull` 增强替代工具。它使用
 [`crane`](https://github.com/google/go-containerregistry/tree/main/cmd/crane) 下载镜像归档，
 再通过 `docker load` 导入 Docker；既不重复实现复杂的 OCI 协议，也不牺牲 Docker 的使用习惯。
@@ -57,6 +59,10 @@ dpull 并不试图替代 Docker 或 crane。它的优势恰恰在于把二者已
 
 运行前需要安装 Docker。`dpull` 会使用 PATH 中已有的 crane；如果未找到，会询问是否自动下载官方版本到
 `~/.dpull/bin`。Compose 启动功能需要 Docker Compose v2。
+
+每次向 `master` 推送代码后，GitHub Actions 会自动运行测试，并为 Linux、Windows、macOS 的
+amd64/arm64 架构生成带 SHA-256 校验文件的 Beta Pre-release。预编译包可从
+[Releases](https://github.com/imythu/dpull/releases) 下载。
 
 ```bash
 go install github.com/imythu/dpull@latest
