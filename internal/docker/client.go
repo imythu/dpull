@@ -3,10 +3,8 @@ package docker
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/imythu/dpull/internal/runner"
 )
@@ -15,25 +13,20 @@ type Client struct {
 	Runner runner.CommandRunner
 }
 
-func (c Client) HasDigest(ctx context.Context, image, digest string) (bool, error) {
+func (c Client) ImageID(ctx context.Context, image string) (string, bool, error) {
 	var output bytes.Buffer
 	command := runner.Command{
-		Name: "docker", Args: []string{"image", "inspect", "--format", "{{json .RepoDigests}}", image},
+		Name: "docker", Args: []string{"image", "inspect", "--format", "{{.Id}}", image},
 		Stdout: &output, Stderr: io.Discard,
 	}
 	if err := c.Runner.Run(ctx, command); err != nil {
-		return false, nil
+		return "", false, nil
 	}
-	var repoDigests []string
-	if err := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &repoDigests); err != nil {
-		return false, fmt.Errorf("decode local digests for image %q: %w", image, err)
+	id := string(bytes.TrimSpace(output.Bytes()))
+	if id == "" {
+		return "", false, fmt.Errorf("inspect local image %q: Docker returned an empty image ID", image)
 	}
-	for _, local := range repoDigests {
-		if strings.HasSuffix(local, "@"+digest) {
-			return true, nil
-		}
-	}
-	return false, nil
+	return id, true, nil
 }
 
 func (c Client) Load(ctx context.Context, tarPath string) error {

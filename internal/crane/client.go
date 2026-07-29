@@ -3,6 +3,7 @@ package crane
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"strings"
@@ -26,20 +27,21 @@ func (c Client) Pull(ctx context.Context, image, target, proxy string) error {
 	return nil
 }
 
-func (c Client) Digest(ctx context.Context, image, proxy string) (string, error) {
+func (c Client) ImageID(ctx context.Context, image, proxy string) (string, error) {
 	var output bytes.Buffer
 	command := runner.Command{
-		Name: c.binary(), Args: []string{"digest", image},
+		Name: c.binary(), Args: []string{"config", image},
 		Env: proxyCommandEnvironment(proxy), Stdout: &output, Stderr: os.Stderr,
 	}
 	if err := c.Runner.Run(ctx, command); err != nil {
-		return "", fmt.Errorf("get remote digest for image %q: %w", image, err)
+		return "", fmt.Errorf("get remote config for image %q: %w", image, err)
 	}
-	digest := strings.TrimSpace(output.String())
-	if digest == "" {
-		return "", fmt.Errorf("get remote digest for image %q: crane returned an empty digest", image)
+	config := bytes.TrimSuffix(output.Bytes(), []byte("\n"))
+	if len(config) == 0 {
+		return "", fmt.Errorf("get remote config for image %q: crane returned empty output", image)
 	}
-	return digest, nil
+	digest := sha256.Sum256(config)
+	return fmt.Sprintf("sha256:%x", digest), nil
 }
 
 func (c Client) binary() string {

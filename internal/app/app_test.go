@@ -23,6 +23,8 @@ type selectiveRunner struct {
 	local    bool
 }
 
+const fixtureImageID = "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+
 type fakeCraneInstaller struct {
 	path  string
 	proxy string
@@ -35,16 +37,16 @@ func (f *fakeCraneInstaller) Ensure(_ context.Context, proxyURL string) (string,
 
 func (r *selectiveRunner) Run(_ context.Context, command runner.Command) error {
 	r.commands = append(r.commands, command)
-	if (command.Name == "crane" || command.Name == "/managed/bin/crane") && command.Args[0] == "digest" {
+	if (command.Name == "crane" || command.Name == "/managed/bin/crane") && command.Args[0] == "config" {
 		if r.failName == "crane" {
 			return errors.New("fixture failure")
 		}
-		_, _ = fmt.Fprintln(command.Stdout, "sha256:remote")
+		_, _ = fmt.Fprintln(command.Stdout, "{}")
 		return nil
 	}
 	if command.Name == "docker" && len(command.Args) > 1 && command.Args[0] == "image" {
 		if r.local {
-			_, _ = fmt.Fprintln(command.Stdout, `["registry.example/api@sha256:remote"]`)
+			_, _ = fmt.Fprintln(command.Stdout, fixtureImageID)
 			return nil
 		}
 		return errors.New("image not found")
@@ -116,7 +118,7 @@ func TestRunSkipsImageAlreadyInDocker(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if len(recorder.commands) != 2 {
-		t.Fatalf("commands = %#v, want crane digest and docker inspect", recorder.commands)
+		t.Fatalf("commands = %#v, want crane config and docker inspect", recorder.commands)
 	}
 }
 

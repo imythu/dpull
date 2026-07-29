@@ -26,8 +26,8 @@ type fakeRunner struct {
 
 func (f *fakeRunner) Run(_ context.Context, command runner.Command) error {
 	f.commands = append(f.commands, command)
-	if command.Name == "crane" && command.Args[0] == "digest" {
-		_, _ = fmt.Fprintln(command.Stdout, "sha256:remote")
+	if command.Name == "crane" && command.Args[0] == "config" {
+		_, _ = fmt.Fprintln(command.Stdout, "{}")
 		return nil
 	}
 	if command.Name == "docker" && len(command.Args) > 1 && command.Args[0] == "image" {

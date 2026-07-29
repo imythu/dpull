@@ -148,17 +148,20 @@ func (a *Application) processImages(ctx context.Context, images []string, runDir
 
 func (a *Application) processImage(ctx context.Context, image, runDir string, options Options) error {
 	tarPath := filepath.Join(runDir, util.TarFilename(image))
-	a.Log.Step("checking remote digest")
-	digest, err := a.Crane.Digest(ctx, image, options.Proxy)
+	a.Log.Step("checking remote image ID")
+	remoteID, err := a.Crane.ImageID(ctx, image, options.Proxy)
 	if err != nil {
 		return err
 	}
-	a.Log.Field("Digest", "%s", digest)
-	matches, err := a.Docker.HasDigest(ctx, image, digest)
+	a.Log.Field("Remote ID", "%s", remoteID)
+	localID, exists, err := a.Docker.ImageID(ctx, image)
 	if err != nil {
 		return err
 	}
-	if matches {
+	if exists {
+		a.Log.Field("Local ID", "%s", localID)
+	}
+	if exists && localID == remoteID {
 		a.Log.Field("Status", "already up to date")
 		a.Log.Field("Result", "skipped")
 		return nil

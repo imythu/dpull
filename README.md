@@ -15,8 +15,8 @@
 
 - **代理场景真正开箱即用。** 内置、本机、用户、环境变量和单次命令五级代理配置有明确优先级，
   HTTP、HTTPS、SOCKS5 均可使用；`dpull proxy` 还能直接解释最终生效来源。代理问题不再靠猜。
-- **不是“看到 tag 就跳过”。** 每次先用 `crane digest` 获取注册表最新 manifest digest，再与 Docker
-  本地 `RepoDigests` 对比。即使仍叫 `latest` 或版本号没变，只要内容变了就会重新拉取；内容没变则省掉下载。
+- **不是“看到 tag 就跳过”。** 每次用 `crane config` 获取远端平台镜像配置并计算 Image ID，再与 Docker
+  本地 `.Id` 对比。即使仍叫 `latest` 或版本号没变，只要内容变了就会重新拉取；内容没变则省掉下载。
 - **Compose 使用体验非常直接。** 无参数即可发现标准 Compose 文件、提取所有 `image`、忽略纯 `build`
   服务并去重。配合 `--up`，从准备镜像到启动服务是一条完整且失败可见的流水线。
 - **可靠性来自成熟组件，而不是重新造协议栈。** 注册表认证、OCI 清单和镜像下载交给广泛使用的
@@ -32,7 +32,7 @@
 
 - **开发机通过本地代理访问镜像仓库：** 设置一次代理，此后直接像使用 `docker pull` 一样运行 dpull。
 - **一台新服务器部署 Compose 项目：** 将 Compose 文件放到目录，执行 `dpull --up`，自动准备镜像并启动。
-- **同一 tag 被持续发布：** dpull 对比真实 digest，不会因为本地已有同名 tag 而漏掉远端更新。
+- **同一 tag 被持续发布：** dpull 对比真实 Image ID，不会因为本地已有同名 tag 而漏掉远端更新。
 - **多镜像批量预热：** `dpull nginx redis mysql` 统一拉取、导入、清理并汇总结果。
 - **不稳定网络或临时中断：** 独立缓存避免并发任务互相破坏，遗留文件会自动过期，也能主动清理。
 - **CI/CD 和运维脚本：** 确定的退出码、可读日志、Compose 支持和无隐藏下载逻辑，便于集成与审计。
@@ -51,7 +51,7 @@ dpull 并不试图替代 Docker 或 crane。它的优势恰恰在于把二者已
 - 为 `crane` 单独配置 HTTP、HTTPS 或 SOCKS5 代理
 - 可选择保留下载的 tar 文件
 - 可在导入完成后执行 `docker compose up -d`
-- 拉取前使用 crane 获取远端最新 digest，与本地镜像 digest 一致时自动跳过
+- 拉取前使用 crane 计算远端 Image ID，与 Docker 本地 Image ID 一致时自动跳过
 - 使用 `dpull clean` 清除完成或未完成的全部下载缓存
 - 缺少 crane 时自动询问并从官方 Release 下载
 
@@ -184,9 +184,9 @@ proxy=socks5://127.0.0.1:7890
 1. 创建 `~/.crane`，并清理其中修改时间超过一小时的一级子目录。
 2. 读取命令行镜像；没有镜像时，从 Compose 文件读取并去重。
 3. 创建 `~/.crane/<UnixNano>/` 作为本次运行的独立缓存。
-4. 执行 `crane digest IMAGE` 获取注册表中的最新 manifest digest。
-5. 读取完整镜像引用的 Docker `RepoDigests`；digest 一致时跳过，标签相同但 digest 变化时重新拉取。
-6. 对本地不存在或 digest 已变化的镜像执行 `crane pull IMAGE TAR`。
+4. 执行 `crane config IMAGE`，对远端原始配置计算 SHA-256 Image ID。
+5. 读取完整镜像引用的 Docker `.Id`；ID 一致时跳过，标签相同但镜像内容变化时重新拉取。
+6. 对本地不存在或 Image ID 已变化的镜像执行 `crane pull IMAGE TAR`。
 7. 执行 `docker load -i TAR`，未指定 `--keep` 时删除归档。
 8. 指定 `--up` 且所有镜像成功时，执行 `docker compose up -d`。
 

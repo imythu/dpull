@@ -36,18 +36,18 @@ func TestLoad(t *testing.T) {
 	}
 }
 
-func TestHasDigestUsesCompleteReference(t *testing.T) {
+func TestImageIDUsesCompleteReference(t *testing.T) {
 	t.Parallel()
-	recorder := &recordingRunner{output: `["ghcr.io/example/api@sha256:abc"]`}
+	recorder := &recordingRunner{output: "sha256:abc\n"}
 	image := "ghcr.io/example/api:1.2.3"
-	matches, err := (Client{Runner: recorder}).HasDigest(context.Background(), image, "sha256:abc")
+	id, exists, err := (Client{Runner: recorder}).ImageID(context.Background(), image)
 	if err != nil {
-		t.Fatalf("HasDigest() error = %v", err)
+		t.Fatalf("ImageID() error = %v", err)
 	}
-	if !matches {
-		t.Fatal("HasDigest() = false, want true")
+	if !exists || id != "sha256:abc" {
+		t.Fatalf("ImageID() = %q, %v", id, exists)
 	}
-	want := []string{"image", "inspect", "--format", "{{json .RepoDigests}}", image}
+	want := []string{"image", "inspect", "--format", "{{.Id}}", image}
 	if !reflect.DeepEqual(recorder.commands[0].Args, want) {
 		t.Fatalf("args = %v, want %v", recorder.commands[0].Args, want)
 	}
@@ -56,15 +56,15 @@ func TestHasDigestUsesCompleteReference(t *testing.T) {
 	}
 }
 
-func TestHasDigestReturnsFalseWhenInspectFails(t *testing.T) {
+func TestImageIDReturnsNotFoundWhenInspectFails(t *testing.T) {
 	t.Parallel()
 	recorder := &recordingRunner{err: errors.New("not found")}
-	matches, err := (Client{Runner: recorder}).HasDigest(context.Background(), "nginx:missing", "sha256:abc")
+	id, exists, err := (Client{Runner: recorder}).ImageID(context.Background(), "nginx:missing")
 	if err != nil {
-		t.Fatalf("HasDigest() error = %v", err)
+		t.Fatalf("ImageID() error = %v", err)
 	}
-	if matches {
-		t.Fatal("HasDigest() = true, want false")
+	if exists || id != "" {
+		t.Fatalf("ImageID() = %q, %v; want not found", id, exists)
 	}
 }
 

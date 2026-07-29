@@ -2,6 +2,7 @@ package crane
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"strings"
 	"testing"
@@ -15,8 +16,8 @@ type recordingRunner struct {
 
 func (r *recordingRunner) Run(_ context.Context, command runner.Command) error {
 	r.command = command
-	if len(command.Args) > 0 && command.Args[0] == "digest" {
-		_, _ = fmt.Fprintln(command.Stdout, "sha256:abc")
+	if len(command.Args) > 0 && command.Args[0] == "config" {
+		_, _ = fmt.Fprintln(command.Stdout, `{"architecture":"amd64"}`)
 	}
 	return nil
 }
@@ -45,17 +46,18 @@ func TestPullSetsProxyEnvironment(t *testing.T) {
 	}
 }
 
-func TestDigest(t *testing.T) {
+func TestImageID(t *testing.T) {
 	t.Parallel()
 	recorder := &recordingRunner{}
-	digest, err := (Client{Runner: recorder}).Digest(context.Background(), "nginx:latest", "")
+	id, err := (Client{Runner: recorder}).ImageID(context.Background(), "nginx:latest", "")
 	if err != nil {
-		t.Fatalf("Digest() error = %v", err)
+		t.Fatalf("ImageID() error = %v", err)
 	}
-	if digest != "sha256:abc" {
-		t.Fatalf("Digest() = %q", digest)
+	want := fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(`{"architecture":"amd64"}`)))
+	if id != want {
+		t.Fatalf("ImageID() = %q, want %q", id, want)
 	}
-	if recorder.command.Args[0] != "digest" || recorder.command.Args[1] != "nginx:latest" {
+	if recorder.command.Args[0] != "config" || recorder.command.Args[1] != "nginx:latest" {
 		t.Fatalf("command args = %v", recorder.command.Args)
 	}
 }
