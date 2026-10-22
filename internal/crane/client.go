@@ -19,10 +19,8 @@ import (
 	gcrane "github.com/google/go-containerregistry/pkg/crane"
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
-	"github.com/google/go-containerregistry/pkg/v1/partial"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
-	"github.com/google/go-containerregistry/pkg/v1/tarball"
 )
 
 // Options configures a single registry request.
@@ -80,7 +78,8 @@ func (c *Client) pull(ctx context.Context, image, target string, options Options
 		return fmt.Errorf("read manifest: %w", err)
 	}
 	// Fetch the config now so writing the archive needs no network access.
-	if _, err := remoteImage.RawConfigFile(); err != nil {
+	config, err := remoteImage.RawConfigFile()
+	if err != nil {
 		return fmt.Errorf("read image config: %w", err)
 	}
 	store, err := c.blobStore(ctx, ref.Context(), options.Proxy)
@@ -105,14 +104,7 @@ func (c *Client) pull(ctx context.Context, image, target string, options Options
 	if err != nil {
 		return err
 	}
-	local, err := partial.CompressedToImage(&cachedImage{remote: remoteImage, manifest: manifest, paths: paths})
-	if err != nil {
-		return fmt.Errorf("assemble image: %w", err)
-	}
-	if err := tarball.WriteToFile(target, tag, local); err != nil {
-		return fmt.Errorf("write archive: %w", err)
-	}
-	return nil
+	return writeArchive(target, tag, config, manifest.Layers, paths)
 }
 
 // Prune removes the completed layer blobs that this client downloaded or

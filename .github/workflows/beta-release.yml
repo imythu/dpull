@@ -15,8 +15,12 @@ concurrency:
 
 jobs:
   test:
-    name: Test
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -27,8 +31,13 @@ jobs:
           go-version: "1.24.x"
           cache: true
 
-      - name: Run tests
+      - name: Run tests with race detector
+        if: runner.os == 'Linux'
         run: go test -race ./...
+
+      - name: Run tests
+        if: runner.os != 'Linux'
+        run: go test ./...
 
       - name: Run go vet
         run: go vet ./...

@@ -153,6 +153,7 @@ func (f *fixture) pullAndCheck(t *testing.T, client *Client) {
 	if err := client.Pull(context.Background(), f.image, target, Options{}); err != nil {
 		t.Fatalf("Pull() error = %v", err)
 	}
+	assertNoOpenFiles(t, client.CacheDir)
 	tag, err := name.NewTag(f.image)
 	if err != nil {
 		t.Fatalf("NewTag() error = %v", err)
@@ -347,6 +348,22 @@ func TestImageIDFailsForMissingImage(t *testing.T) {
 	missing := strings.Replace(f.image, "fixture", "missing", 1)
 	if _, err := f.client(t, nil).ImageID(context.Background(), missing, Options{}); err == nil {
 		t.Fatal("ImageID() error = nil, want failure")
+	}
+}
+
+// assertNoOpenFiles fails when this process still has a file under dir open,
+// which would stop Prune from deleting it on Windows.
+func assertNoOpenFiles(t *testing.T, dir string) {
+	t.Helper()
+	fds, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		return // only checkable where /proc exists
+	}
+	for _, fd := range fds {
+		target, err := os.Readlink(filepath.Join("/proc/self/fd", fd.Name()))
+		if err == nil && strings.HasPrefix(target, dir+string(filepath.Separator)) {
+			t.Fatalf("file still open after Pull: %s", target)
+		}
 	}
 }
 
