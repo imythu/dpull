@@ -131,3 +131,62 @@ func writeConfig(t *testing.T, path, content string) {
 		t.Fatalf("write config: %v", err)
 	}
 }
+
+func TestResolveDirectDisablesProxy(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	userPath := filepath.Join(dir, "user.conf")
+	writeConfig(t, userPath, "proxy=direct\n")
+	resolver := &Resolver{
+		SystemPath: filepath.Join(dir, "missing.conf"),
+		UserPath:   userPath,
+		LookupEnv:  func(string) (string, bool) { return "", false },
+	}
+	info, err := resolver.Resolve("")
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if info.Enabled() || info.Source != SourceUser || info.User != Direct {
+		t.Fatalf("info = %+v, want proxy disabled by user config", info)
+	}
+	if got := info.Describe(); got != "disabled, direct connection (source: user config)" {
+		t.Fatalf("Describe() = %q", got)
+	}
+	info, err = resolver.Resolve("socks5://flag:1080")
+	if err != nil {
+		t.Fatalf("Resolve(flag) error = %v", err)
+	}
+	if !info.Enabled() || info.Describe() != "socks5://flag:1080 (source: --proxy)" {
+		t.Fatalf("flag did not override direct: %+v", info)
+	}
+	info, err = resolver.Resolve("DIRECT")
+	if err != nil || info.Enabled() || info.Source != SourceFlag {
+		t.Fatalf("Resolve(DIRECT) = %+v, %v", info, err)
+	}
+}
+
+func TestSetDirectAndReset(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	resolver := &Resolver{
+		SystemPath: filepath.Join(dir, "system.conf"),
+		UserPath:   filepath.Join(dir, "user.conf"),
+		LookupEnv:  func(string) (string, bool) { return "", false },
+	}
+	if _, err := resolver.Set("Direct", false); err != nil {
+		t.Fatalf("Set(direct) error = %v", err)
+	}
+	if info, _ := resolver.Resolve(""); info.Enabled() {
+		t.Fatalf("proxy still enabled after Set(direct): %+v", info)
+	}
+	if _, removed, err := resolver.Reset(false); err != nil || !removed {
+		t.Fatalf("Reset() removed = %v, error = %v", removed, err)
+	}
+	info, _ := resolver.Resolve("")
+	if info.Effective != BuiltinProxy || info.Source != SourceBuiltin {
+		t.Fatalf("after Reset() info = %+v, want builtin", info)
+	}
+	if _, removed, err := resolver.Reset(false); err != nil || removed {
+		t.Fatalf("second Reset() removed = %v, error = %v", removed, err)
+	}
+}

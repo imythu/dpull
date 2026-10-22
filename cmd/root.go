@@ -12,13 +12,15 @@ import (
 	"github.com/imythu/dpull/internal/cache"
 	"github.com/imythu/dpull/internal/completion"
 	"github.com/imythu/dpull/internal/crane"
-	"github.com/imythu/dpull/internal/craneinstall"
 	"github.com/imythu/dpull/internal/docker"
 	"github.com/imythu/dpull/internal/logger"
 	"github.com/imythu/dpull/internal/proxy"
 	"github.com/imythu/dpull/internal/runner"
 	"github.com/spf13/cobra"
 )
+
+// Version is set at build time with -ldflags "-X github.com/imythu/dpull/cmd.Version=...".
+var Version = "dev"
 
 func Execute(ctx context.Context) int {
 	root, err := cache.DefaultRoot()
@@ -27,18 +29,12 @@ func Execute(ctx context.Context) int {
 		return 1
 	}
 	commandRunner := runner.ExecRunner{}
-	craneInstaller, err := craneinstall.Default()
-	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
-	}
 	application := &app.Application{
-		Cache:          cache.New(root),
-		Crane:          crane.Client{Runner: commandRunner},
-		Docker:         docker.Client{Runner: commandRunner},
-		Log:            logger.New(os.Stdout),
-		Now:            time.Now,
-		CraneInstaller: craneInstaller,
+		Cache:  cache.New(root),
+		Crane:  crane.Client{Progress: os.Stdout},
+		Docker: docker.Client{Runner: commandRunner},
+		Log:    logger.New(os.Stdout),
+		Now:    time.Now,
 	}
 	proxyResolver, err := proxy.DefaultResolver()
 	if err != nil {
@@ -59,10 +55,11 @@ func NewRootCommand(application *app.Application, resolvers ...*proxy.Resolver) 
 	resolver := firstResolver(resolvers)
 	command := &cobra.Command{
 		Use:           "dpull [IMAGE...]",
-		Short:         "Pull container images with crane and load them into Docker",
+		Short:         "Pull container images with built-in crane and load them into Docker",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Args:          cobra.ArbitraryArgs,
+		Version:       Version,
 		RunE: func(command *cobra.Command, args []string) error {
 			proxyInfo, err := resolver.Resolve(options.Proxy)
 			if err != nil {
@@ -70,6 +67,7 @@ func NewRootCommand(application *app.Application, resolvers ...*proxy.Resolver) 
 			}
 			options.Images = append([]string(nil), args...)
 			options.Proxy = proxyInfo.Effective
+			options.ProxySource = string(proxyInfo.Source)
 			if err := application.Run(command.Context(), options); err != nil {
 				return fmt.Errorf("run dpull: %w", err)
 			}
@@ -79,12 +77,11 @@ func NewRootCommand(application *app.Application, resolvers ...*proxy.Resolver) 
 	flags := command.Flags()
 	flags.BoolVar(&options.Up, "up", false, "run docker compose up -d after loading images")
 	flags.StringVarP(&options.ComposeFile, "file", "f", "", "specify a Compose file")
-	flags.StringVar(&options.Proxy, "proxy", "", "proxy URL for crane (http://, https://, socks5://)")
+	flags.StringVar(&options.Proxy, "proxy", "", "proxy URL for image downloads (http://, https://, socks5://), or \"direct\" to disable")
+	flags.StringVar(&options.Platform, "platform", "", "image platform as os/arch[/variant] (default: Docker daemon platform)")
 	flags.BoolVar(&options.Keep, "keep", false, "keep downloaded image archives")
 	command.AddCommand(newProxyCommand(resolver))
 	command.AddCommand(newCleanCommand(application))
-	command.AddCommand(newCraneCommand(commandCraneInstaller(application), resolver))
-	command.AddCommand(newInstallCraneCommand(commandCraneInstaller(application), resolver, "install-crane"))
 	command.AddCommand(newCompletionCommand())
 	return command
 }
@@ -175,50 +172,6 @@ func printCompletionHint(command *cobra.Command, shell, path string) {
 	}
 }
 
-func newCraneCommand(installer *craneinstall.Installer, resolver *proxy.Resolver) *cobra.Command {
-	command := &cobra.Command{
-		Use:   "crane",
-		Short: "Manage the crane dependency",
-		Args:  cobra.NoArgs,
-	}
-	command.AddCommand(newInstallCraneCommand(installer, resolver, "install"))
-	return command
-}
-
-func newInstallCraneCommand(installer *craneinstall.Installer, resolver *proxy.Resolver, use string) *cobra.Command {
-	var proxyFlag string
-	command := &cobra.Command{
-		Use:   use,
-		Short: "Download and install crane from the official GitHub release",
-		Args:  cobra.NoArgs,
-		RunE: func(command *cobra.Command, _ []string) error {
-			proxyInfo, err := resolver.Resolve(proxyFlag)
-			if err != nil {
-				return fmt.Errorf("resolve crane download proxy: %w", err)
-			}
-			if _, err := installer.Install(command.Context(), proxyInfo.Effective); err != nil {
-				return fmt.Errorf("install crane: %w", err)
-			}
-			return nil
-		},
-	}
-	command.Flags().StringVar(&proxyFlag, "proxy", "", "download proxy (http://, https://, socks5://)")
-	return command
-}
-
-func commandCraneInstaller(application *app.Application) *craneinstall.Installer {
-	if application != nil {
-		if installer, ok := application.CraneInstaller.(*craneinstall.Installer); ok {
-			return installer
-		}
-	}
-	installer, err := craneinstall.Default()
-	if err == nil {
-		return installer
-	}
-	return &craneinstall.Installer{}
-}
-
 func newCleanCommand(application *app.Application) *cobra.Command {
 	return &cobra.Command{
 		Use:     "clean",
@@ -254,7 +207,8 @@ func newProxyCommand(resolver *proxy.Resolver) *cobra.Command {
 		Use:   "proxy",
 		Short: "Show the effective proxy configuration",
 		Long: "Show the effective crane proxy and every configuration source.\n\n" +
-			"Supported proxy URL schemes: http://, https://, and socks5://.",
+			"Supported proxy URL schemes: http://, https://, and socks5://.\n" +
+			"Use \"direct\" at any level (or `dpull proxy disable`) to turn the proxy off.",
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			info, err := resolver.Resolve("")
@@ -266,6 +220,8 @@ func newProxyCommand(resolver *proxy.Resolver) *cobra.Command {
 		},
 	}
 	command.AddCommand(newProxySetCommand(resolver))
+	command.AddCommand(newProxyDisableCommand(resolver))
+	command.AddCommand(newProxyResetCommand(resolver))
 	return command
 }
 
@@ -275,7 +231,7 @@ func newProxySetCommand(resolver *proxy.Resolver) *cobra.Command {
 		Use:   "set URL",
 		Short: "Save the proxy configuration",
 		Long: "Save an HTTP, HTTPS, or SOCKS5 proxy URL. Supported formats:\n" +
-			"  http://host:port\n  https://host:port\n  socks5://host:port",
+			"  http://host:port\n  https://host:port\n  socks5://host:port\n  direct (disable the proxy)",
 		Example: "  dpull proxy set http://127.0.0.1:7890\n" +
 			"  dpull proxy set socks5://127.0.0.1:1080\n" +
 			"  sudo dpull proxy set -g https://proxy.example.com:8443",
@@ -293,12 +249,70 @@ func newProxySetCommand(resolver *proxy.Resolver) *cobra.Command {
 	return command
 }
 
+func newProxyDisableCommand(resolver *proxy.Resolver) *cobra.Command {
+	var global bool
+	command := &cobra.Command{
+		Use:     "disable",
+		Aliases: []string{"off"},
+		Short:   "Turn the proxy off and connect to registries directly",
+		Long: "Save proxy=direct so downloads connect directly. This overrides the builtin\n" +
+			"default and lower-priority configs; DPULL_PROXY and --proxy still take precedence.\n" +
+			"Re-enable with `dpull proxy set URL` or `dpull proxy reset`.",
+		Args: cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			path, err := resolver.Set(proxy.Direct, global)
+			if err != nil {
+				return fmt.Errorf("disable proxy: %w", err)
+			}
+			_, _ = fmt.Fprintf(command.OutOrStdout(), "Proxy disabled in %s\n", path)
+			return printEffectiveProxy(command, resolver)
+		},
+	}
+	command.Flags().BoolVarP(&global, "global", "g", false, "save to /etc/dpull.conf")
+	return command
+}
+
+func newProxyResetCommand(resolver *proxy.Resolver) *cobra.Command {
+	var global bool
+	command := &cobra.Command{
+		Use:   "reset",
+		Short: "Remove the saved proxy setting and fall back to lower-priority sources",
+		Args:  cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			path, removed, err := resolver.Reset(global)
+			if err != nil {
+				return fmt.Errorf("reset proxy: %w", err)
+			}
+			if removed {
+				_, _ = fmt.Fprintf(command.OutOrStdout(), "Removed %s\n", path)
+			} else {
+				_, _ = fmt.Fprintf(command.OutOrStdout(), "No proxy config at %s\n", path)
+			}
+			return printEffectiveProxy(command, resolver)
+		},
+	}
+	command.Flags().BoolVarP(&global, "global", "g", false, "remove /etc/dpull.conf")
+	return command
+}
+
+func printEffectiveProxy(command *cobra.Command, resolver *proxy.Resolver) error {
+	info, err := resolver.Resolve("")
+	if err != nil {
+		return fmt.Errorf("resolve proxy: %w", err)
+	}
+	_, _ = fmt.Fprintf(command.OutOrStdout(), "Now using: %s\n", info.Describe())
+	return nil
+}
+
 func printProxyInfo(command *cobra.Command, info proxy.Info) {
+	status := "enabled"
 	value := info.Effective
-	if value == "" {
-		value = "disabled"
+	if !info.Enabled() {
+		status = "disabled"
+		value = "none (direct connection)"
 	}
 	_, _ = fmt.Fprintln(command.OutOrStdout(), "[Proxy]")
+	_, _ = fmt.Fprintf(command.OutOrStdout(), "  %-12s %s\n", "Status:", status)
 	_, _ = fmt.Fprintf(command.OutOrStdout(), "  %-12s %s\n", "Effective:", value)
 	_, _ = fmt.Fprintf(command.OutOrStdout(), "  %-12s %s\n", "Source:", info.Source)
 	_, _ = fmt.Fprintln(command.OutOrStdout(), "\n[Sources]")

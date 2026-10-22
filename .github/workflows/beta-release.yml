@@ -75,7 +75,7 @@ jobs:
             package_dir="staging/${package}"
             mkdir -p "$package_dir"
             GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
-              go build -trimpath -ldflags="-s -w" -o "${package_dir}/${binary}" .
+              go build -trimpath -ldflags="-s -w -X github.com/imythu/dpull/cmd.Version=${VERSION}" -o "${package_dir}/${binary}" .
             cp README.md LICENSE "$package_dir/"
 
             if [[ "$goos" == "windows" ]]; then

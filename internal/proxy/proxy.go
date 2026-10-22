@@ -10,7 +10,9 @@ import (
 )
 
 const (
-	BuiltinProxy    = "http://127.0.0.1:7890"
+	BuiltinProxy = "http://127.0.0.1:7890"
+	// Direct disables the proxy at any configuration level.
+	Direct          = "direct"
 	EnvironmentName = "DPULL_PROXY"
 	SystemConfig    = "/etc/dpull.conf"
 )
@@ -71,10 +73,48 @@ func (r *Resolver) Resolve(flagValue string) (Info, error) {
 		apply(&info, info.Env, SourceEnv)
 	}
 	apply(&info, strings.TrimSpace(flagValue), SourceFlag)
+	if IsDirect(info.Effective) {
+		info.Effective = ""
+		return info, nil
+	}
 	if err := Validate(info.Effective); err != nil {
 		return Info{}, fmt.Errorf("validate %s proxy: %w", info.Source, err)
 	}
 	return info, nil
+}
+
+// Enabled reports whether downloads go through a proxy.
+func (i Info) Enabled() bool {
+	return i.Effective != ""
+}
+
+// Describe summarises the effective proxy and where it came from.
+func (i Info) Describe() string {
+	if !i.Enabled() {
+		return fmt.Sprintf("disabled, direct connection (source: %s)", i.Source)
+	}
+	return fmt.Sprintf("%s (source: %s)", i.Effective, i.Source)
+}
+
+// IsDirect reports whether value disables the proxy.
+func IsDirect(value string) bool {
+	return strings.EqualFold(strings.TrimSpace(value), Direct)
+}
+
+// Reset removes the user or global proxy configuration so lower-priority
+// sources apply again. It reports whether a file was removed.
+func (r *Resolver) Reset(global bool) (string, bool, error) {
+	path := r.UserPath
+	if global {
+		path = r.SystemPath
+	}
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return path, false, nil
+		}
+		return path, false, fmt.Errorf("remove proxy config %q: %w", path, err)
+	}
+	return path, true, nil
 }
 
 func (r *Resolver) Set(value string, global bool) (string, error) {
@@ -82,7 +122,9 @@ func (r *Resolver) Set(value string, global bool) (string, error) {
 	if value == "" {
 		return "", fmt.Errorf("set proxy: value is empty")
 	}
-	if err := Validate(value); err != nil {
+	if IsDirect(value) {
+		value = Direct
+	} else if err := Validate(value); err != nil {
 		return "", fmt.Errorf("set proxy: %w", err)
 	}
 	path := r.UserPath

@@ -19,19 +19,24 @@ type Options struct {
 	Images      []string
 	ComposeFile string
 	Proxy       string
+	ProxySource string
+	Platform    string
 	Keep        bool
 	Up          bool
 }
 
+// Registry resolves and downloads remote images.
+type Registry interface {
+	ImageID(ctx context.Context, image string, options crane.Options) (string, error)
+	Pull(ctx context.Context, image, target string, options crane.Options) error
+}
+
 type Application struct {
-	Cache          *cache.Manager
-	Crane          crane.Client
-	Docker         docker.Client
-	Log            *logger.Logger
-	Now            func() time.Time
-	CraneInstaller interface {
-		Ensure(context.Context, string) (string, error)
-	}
+	Cache  *cache.Manager
+	Crane  Registry
+	Docker docker.Client
+	Log    *logger.Logger
+	Now    func() time.Time
 }
 
 type Result struct {
@@ -53,17 +58,12 @@ func (a *Application) Clean() (int, error) {
 
 func (a *Application) Run(ctx context.Context, options Options) error {
 	started := a.Now()
-	if a.CraneInstaller != nil {
-		binary, err := a.CraneInstaller.Ensure(ctx, options.Proxy)
-		if err != nil {
-			return fmt.Errorf("ensure crane is installed: %w", err)
-		}
-		a.Crane.Binary = binary
-	}
 	a.Log.Banner()
 	if err := a.initialize(); err != nil {
 		return err
 	}
+	a.Log.Field("Proxy", "%s", describeProxy(options))
+	options.Platform = a.resolvePlatform(ctx, options.Platform)
 	images, composeFile, err := a.resolveImages(options)
 	if err != nil {
 		return err
@@ -108,6 +108,21 @@ func (a *Application) initialize() error {
 	return nil
 }
 
+// resolvePlatform prefers an explicit platform, then the Docker daemon's
+// platform, then the host architecture.
+func (a *Application) resolvePlatform(ctx context.Context, platform string) string {
+	if platform == "" {
+		detected, err := a.Docker.Platform(ctx)
+		if err != nil {
+			a.Log.Warning("%v; falling back to %s", err, crane.DefaultPlatform())
+			detected = crane.DefaultPlatform()
+		}
+		platform = detected
+	}
+	a.Log.Field("Platform", "%s", platform)
+	return platform
+}
+
 func (a *Application) resolveImages(options Options) ([]string, string, error) {
 	if len(options.Images) > 0 {
 		return unique(options.Images), options.ComposeFile, nil
@@ -148,8 +163,9 @@ func (a *Application) processImages(ctx context.Context, images []string, runDir
 
 func (a *Application) processImage(ctx context.Context, image, runDir string, options Options) error {
 	tarPath := filepath.Join(runDir, util.TarFilename(image))
+	registryOptions := crane.Options{Proxy: options.Proxy, Platform: options.Platform}
 	a.Log.Step("checking remote image ID")
-	remoteID, err := a.Crane.ImageID(ctx, image, options.Proxy)
+	remoteID, err := a.Crane.ImageID(ctx, image, registryOptions)
 	if err != nil {
 		return err
 	}
@@ -168,8 +184,8 @@ func (a *Application) processImage(ctx context.Context, image, runDir string, op
 	}
 	a.Log.Field("Status", "download required")
 	a.Log.Field("Cache", "%s", tarPath)
-	a.Log.Step("pulling with crane")
-	if err := a.Crane.Pull(ctx, image, tarPath, options.Proxy); err != nil {
+	a.Log.Step("pulling with crane via %s", proxyRoute(options.Proxy))
+	if err := a.Crane.Pull(ctx, image, tarPath, registryOptions); err != nil {
 		return err
 	}
 	a.Log.Step("loading into Docker")
@@ -193,6 +209,21 @@ func (a *Application) summary(result Result, elapsed time.Duration) {
 	a.Log.Field("Success", "%d", result.Success)
 	a.Log.Field("Failed", "%d", result.Failed)
 	a.Log.Field("Elapsed", "%.1fs", elapsed.Seconds())
+}
+
+func describeProxy(options Options) string {
+	description := proxyRoute(options.Proxy)
+	if options.ProxySource != "" {
+		description += " (source: " + options.ProxySource + ")"
+	}
+	return description
+}
+
+func proxyRoute(proxy string) string {
+	if proxy == "" {
+		return "direct connection, proxy disabled"
+	}
+	return "proxy " + proxy
 }
 
 func unique(values []string) []string {

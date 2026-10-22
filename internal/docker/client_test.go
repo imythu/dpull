@@ -79,3 +79,27 @@ func TestComposeUpWithFile(t *testing.T) {
 		t.Fatalf("args = %v, want %v", recorder.commands[0].Args, want)
 	}
 }
+
+func TestPlatformQueriesDaemon(t *testing.T) {
+	t.Parallel()
+	recorder := &recordingRunner{output: "linux/arm64\n"}
+	platform, err := (Client{Runner: recorder}).Platform(context.Background())
+	if err != nil {
+		t.Fatalf("Platform() error = %v", err)
+	}
+	if platform != "linux/arm64" {
+		t.Fatalf("Platform() = %q, want linux/arm64", platform)
+	}
+	want := []string{"version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"}
+	if !reflect.DeepEqual(recorder.commands[0].Args, want) {
+		t.Fatalf("args = %v, want %v", recorder.commands[0].Args, want)
+	}
+}
+
+func TestPlatformFailsWhenDaemonUnavailable(t *testing.T) {
+	t.Parallel()
+	recorder := &recordingRunner{err: errors.New("daemon down")}
+	if _, err := (Client{Runner: recorder}).Platform(context.Background()); err == nil {
+		t.Fatal("Platform() error = nil, want failure")
+	}
+}

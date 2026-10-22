@@ -3,7 +3,7 @@
 [![Beta Release](https://github.com/imythu/dpull/actions/workflows/beta-release.yml/badge.svg)](https://github.com/imythu/dpull/actions/workflows/beta-release.yml)
 
 `dpull` 是一个面向代理网络、Compose 项目和重复部署场景的 `docker pull` 增强替代工具。它使用
-[`crane`](https://github.com/google/go-containerregistry/tree/main/cmd/crane) 下载镜像归档，
+内置的 [`crane`](https://github.com/google/go-containerregistry/tree/main/cmd/crane) 库下载镜像归档，
 再通过 `docker load` 导入 Docker；既不重复实现复杂的 OCI 协议，也不牺牲 Docker 的使用习惯。
 
 一句话概括：**让受限网络中的镜像拉取更稳定，让 Compose 项目的镜像准备从一串手工命令变成一次可靠执行。**
@@ -15,17 +15,17 @@
 
 - **代理场景真正开箱即用。** 内置、本机、用户、环境变量和单次命令五级代理配置有明确优先级，
   HTTP、HTTPS、SOCKS5 均可使用；`dpull proxy` 还能直接解释最终生效来源。代理问题不再靠猜。
-- **不是“看到 tag 就跳过”。** 每次用 `crane config` 获取远端平台镜像配置并计算 Image ID，再与 Docker
+- **不是“看到 tag 就跳过”。** 每次通过内置 crane 获取远端平台镜像配置并计算 Image ID，再与 Docker
   本地 `.Id` 对比。即使仍叫 `latest` 或版本号没变，只要内容变了就会重新拉取；内容没变则省掉下载。
 - **Compose 使用体验非常直接。** 无参数即可发现标准 Compose 文件、提取所有 `image`、忽略纯 `build`
   服务并去重。配合 `--up`，从准备镜像到启动服务是一条完整且失败可见的流水线。
 - **可靠性来自成熟组件，而不是重新造协议栈。** 注册表认证、OCI 清单和镜像下载交给广泛使用的
-  `crane`；导入和启动交给 Docker。dpull 只编排边界清晰、容易审计的流程，因此小而可靠。
+  `crane` 库（已编译进 dpull）；导入和启动交给 Docker。dpull 只编排边界清晰、容易审计的流程，因此小而可靠。
 - **缓存不会悄悄失控。** 每次运行使用纳秒时间戳独立目录，可并发执行；一小时过期缓存自动回收，
   `dpull clean` 还能一键清除完成或中断的下载。
-- **适合自动化。** 全程使用 `context.Context`、明确的 0/1 退出码、原样透传 crane 输出，并在最后给出
+- **适合自动化。** 全程使用 `context.Context`、明确的 0/1 退出码，并在最后给出
   成功、失败和耗时汇总。脚本和 CI 可以准确判断结果，人也能迅速定位失败镜像。
-- **安装后的体验完整。** crane 缺失时可自动下载官方 Release，代理同样生效；Bash、Zsh、Fish、
+- **单文件、零依赖。** crane 已直接编译进 dpull，无需另外下载或配置 PATH；Bash、Zsh、Fish、
   PowerShell 补全均可一条命令安装。
 
 ## 典型使用场景
@@ -48,21 +48,24 @@ dpull 并不试图替代 Docker 或 crane。它的优势恰恰在于把二者已
 - 忽略仅包含 `build`、没有 `image` 的服务
 - 为每次运行创建独立缓存目录，支持并发执行
 - 启动时清理超过一小时的缓存目录
-- 为 `crane` 单独配置 HTTP、HTTPS 或 SOCKS5 代理
+- 为镜像下载单独配置 HTTP、HTTPS 或 SOCKS5 代理
 - 可选择保留下载的 tar 文件
 - 可在导入完成后执行 `docker compose up -d`
 - 拉取前使用 crane 计算远端 Image ID，与 Docker 本地 Image ID 一致时自动跳过
 - 使用 `dpull clean` 清除完成或未完成的全部下载缓存
-- 缺少 crane 时自动询问并从官方 Release 下载
+- 内置 crane，无需单独安装
 
 ## 安装
 
-运行前需要安装 Docker。`dpull` 会使用 PATH 中已有的 crane；如果未找到，会询问是否自动下载官方版本到
-`~/.dpull/bin`。Compose 启动功能需要 Docker Compose v2。
+运行前只需要安装 Docker，crane 已内置在 dpull 中，无需单独下载。默认拉取与 Docker 守护进程一致的平台（如 `linux/arm64`），
+可用 `--platform` 指定；无法连接 Docker 时退回 `linux/<本机架构>`。
+Compose 启动功能需要 Docker Compose v2。
 
-每次向 `master` 推送代码后，GitHub Actions 会自动运行测试，并为 Linux、Windows、macOS 的
-amd64/arm64 架构生成带 SHA-256 校验文件的 Beta Pre-release。预编译包可从
-[Releases](https://github.com/imythu/dpull/releases) 下载。
+推荐从 [Releases](https://github.com/imythu/dpull/releases/latest) 下载最新正式版，提供 Linux、
+Windows、macOS 的 amd64/arm64 预编译包及 SHA-256 校验文件。解压后即可使用，无需另外安装 crane；
+`dpull --version` 可查看版本。
+
+推送 `v*` 标签会自动测试并发布正式版；每次向 `master` 推送代码还会生成 Beta Pre-release。
 
 ```bash
 go install github.com/imythu/dpull@latest
@@ -90,12 +93,14 @@ dpull --proxy socks5://127.0.0.1:7890 nginx
 dpull proxy
 dpull proxy set socks5://127.0.0.1:7890
 sudo dpull proxy set -g http://proxy.example.com:8080
+dpull proxy disable
+dpull proxy reset
+dpull --proxy direct nginx
 dpull clean
-dpull crane install
-dpull crane install --proxy socks5://127.0.0.1:7890
 dpull completion install
 dpull completion install bash
 dpull --keep nginx
+dpull --platform linux/arm64 nginx
 dpull -f docker-compose.yml
 dpull --up
 dpull -f compose.yaml --up
@@ -109,32 +114,14 @@ dpull -f compose.yaml --up
 | 参数 | 说明 |
 | --- | --- |
 | `-f, --file FILE` | 指定 Compose 文件 |
-| `--proxy URL` | 为 crane 设置 `ALL_PROXY`、`HTTP_PROXY` 和 `HTTPS_PROXY` |
+| `--proxy URL` | 仅为本次镜像下载指定代理，不影响 Docker；`--proxy direct` 表示本次不使用代理 |
+| `--platform OS/ARCH` | 指定镜像平台，如 `linux/amd64`、`linux/arm/v7`；默认使用 Docker 守护进程的平台 |
 | `--keep` | 导入后保留 tar 归档 |
 | `--up` | 全部镜像成功后执行 `docker compose up -d` |
 | `-h, --help` | 显示帮助 |
 
 子命令 `dpull clean`（别名 `dpull cleanup`）会删除 `~/.crane` 下的全部缓存内容，
 包括 `--keep` 保留的归档和下载中断产生的文件。请勿在其他 `dpull` 实例下载时运行该命令。
-
-## 安装 crane
-
-执行镜像拉取前，`dpull` 会检查 PATH 和 `~/.dpull/bin/crane`。未找到时会询问是否从
-`google/go-containerregistry` 官方 GitHub Release 下载。也可以主动安装：
-
-```bash
-dpull crane install
-# 等价的快捷命令
-dpull install-crane
-```
-
-crane 下载使用与镜像拉取相同的代理优先级，也可以仅为本次安装指定代理：
-
-```bash
-dpull crane install --proxy http://127.0.0.1:7890
-```
-
-安装位置为 `~/.dpull/bin/crane`，Windows 下为 `~/.dpull/bin/crane.exe`。
 
 ## Shell 补全
 
@@ -175,18 +162,40 @@ proxy=socks5://127.0.0.1:7890
 支持 `http://`、`https://` 和 `socks5://` 代理 URL，也可以包含用户名和密码，例如
 `http://user:password@proxy.example.com:8080`。
 
-使用 `dpull proxy` 可以查看当前生效的代理、来源以及各层配置。使用
-`dpull proxy set URL` 写入当前用户配置，使用 `dpull proxy set -g URL` 写入全局配置。
-写入 `/etc/dpull.conf` 通常需要 `sudo`。
+### 关闭代理
+
+任意一层配置为 `direct` 都表示不使用代理、直连镜像仓库，例如 `proxy=direct`、
+`DPULL_PROXY=direct` 或 `--proxy direct`。更高优先级的配置仍然可以重新启用代理。
+
+| 命令 | 说明 |
+| --- | --- |
+| `dpull proxy` | 查看是否启用代理（`Status`）、生效的代理、来源以及各层配置 |
+| `dpull proxy set URL` | 写入当前用户配置；`-g` 写入全局配置 `/etc/dpull.conf` |
+| `dpull proxy disable`（别名 `off`） | 在当前用户配置中写入 `proxy=direct`，关闭代理；`-g` 作用于全局配置 |
+| `dpull proxy reset` | 删除当前用户的代理配置，恢复使用更低优先级的配置；`-g` 删除全局配置 |
+
+写入或删除 `/etc/dpull.conf` 通常需要 `sudo`。
+
+每次拉取都会在 `[Init]` 中输出本次使用的代理及其来源，并在下载每个镜像时再次说明：
+
+```text
+[Init]
+  Proxy:     proxy http://127.0.0.1:7890 (source: builtin)
+...
+  -> pulling with crane via proxy http://127.0.0.1:7890
+```
+
+关闭代理时则显示 `direct connection, proxy disabled`。
 
 ## 工作流程
 
 1. 创建 `~/.crane`，并清理其中修改时间超过一小时的一级子目录。
 2. 读取命令行镜像；没有镜像时，从 Compose 文件读取并去重。
 3. 创建 `~/.crane/<UnixNano>/` 作为本次运行的独立缓存。
-4. 执行 `crane config IMAGE`，对远端原始配置计算 SHA-256 Image ID。
+4. 使用内置 crane 获取远端镜像配置，对远端原始配置计算 SHA-256 Image ID。
 5. 读取完整镜像引用的 Docker `.Id`；ID 一致时跳过，标签相同但镜像内容变化时重新拉取。
-6. 对本地不存在或 Image ID 已变化的镜像执行 `crane pull IMAGE TAR`。
+6. 对本地不存在或 Image ID 已变化的镜像，使用内置 crane 下载为 TAR，并实时显示进度条
+   （百分比、已下载/总大小、速度）。在 CI 等非终端环境中每 10% 输出一行。
 7. 执行 `docker load -i TAR`，未指定 `--keep` 时删除归档。
 8. 指定 `--up` 且所有镜像成功时，执行 `docker compose up -d`。
 
@@ -194,13 +203,13 @@ proxy=socks5://127.0.0.1:7890
 
 ## 常见问题
 
-**为什么提示找不到 crane 或 docker？**
+**为什么提示找不到 docker？**
 
-请先安装对应程序，并确认可执行文件位于当前 shell 的 `PATH` 中。
+请先安装 Docker，并确认可执行文件位于当前 shell 的 `PATH` 中。
 
 **代理会影响 docker 吗？**
 
-不会。`--proxy` 只覆盖启动 `crane` 时的三个代理环境变量，Docker 保持原有环境。
+不会。`--proxy` 只作用于 dpull 进程内的镜像下载，Docker 保持原有环境。
 
 **失败后 tar 为什么仍然存在？**
 
@@ -213,7 +222,7 @@ proxy=socks5://127.0.0.1:7890
 ## 为什么使用 crane
 
 镜像协议、注册表认证和多平台清单处理有大量边界情况。`crane` 已经提供成熟的 OCI 镜像下载能力，
-`dpull` 专注于命令行体验、Compose 解析、缓存生命周期和 Docker 导入，不重复实现这套协议栈。
+`dpull` 以 Go 库的形式直接内置 crane，专注于命令行体验、Compose 解析、缓存生命周期和 Docker 导入，不重复实现这套协议栈。
 
 ## License
 

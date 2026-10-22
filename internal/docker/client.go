@@ -29,6 +29,23 @@ func (c Client) ImageID(ctx context.Context, image string) (string, bool, error)
 	return id, true, nil
 }
 
+// Platform returns the os/arch of the Docker daemon, e.g. linux/arm64.
+func (c Client) Platform(ctx context.Context) (string, error) {
+	var output bytes.Buffer
+	command := runner.Command{
+		Name: "docker", Args: []string{"version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"},
+		Stdout: &output, Stderr: io.Discard,
+	}
+	if err := c.Runner.Run(ctx, command); err != nil {
+		return "", fmt.Errorf("query Docker platform: %w", err)
+	}
+	platform := string(bytes.TrimSpace(output.Bytes()))
+	if platform == "" || platform == "/" {
+		return "", fmt.Errorf("query Docker platform: Docker returned an empty platform")
+	}
+	return platform, nil
+}
+
 func (c Client) Load(ctx context.Context, tarPath string) error {
 	command := runner.TerminalCommand("docker", "load", "-i", tarPath)
 	if err := c.Runner.Run(ctx, command); err != nil {
