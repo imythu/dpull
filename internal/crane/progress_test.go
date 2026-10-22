@@ -41,6 +41,21 @@ func TestProgressBarFinishDrawsThrottledState(t *testing.T) {
 	}
 }
 
+func TestProgressBarSpeedExcludesReusedBytes(t *testing.T) {
+	t.Parallel()
+	var output bytes.Buffer
+	now := time.Unix(0, 0)
+	bar := newProgressBar(&output, func() time.Time { return now })
+	bar.total = 3000
+	bar.reuse(2000)
+	now = now.Add(2 * time.Second)
+	bar.add(1000)
+	bar.finish()
+	if !strings.Contains(output.String(), "500 B/s") {
+		t.Fatalf("output = %q, want speed of downloaded bytes only", output.String())
+	}
+}
+
 func TestFormatBytes(t *testing.T) {
 	t.Parallel()
 	cases := map[int64]string{512: "512 B", 1536: "1.5 KiB", 5 << 20: "5.0 MiB", 3 << 30: "3.0 GiB"}

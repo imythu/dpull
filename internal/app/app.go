@@ -73,6 +73,13 @@ func (a *Application) Run(ctx context.Context, options Options) error {
 		return fmt.Errorf("prepare run cache: %w", err)
 	}
 	result := a.processImages(ctx, images, runDir, options)
+	// Keep downloaded layers after a failure so a rerun can reuse them; the
+	// cache cleanup removes them after an hour.
+	if pruner, ok := a.Crane.(interface{ Prune() error }); ok && result.Failed == 0 {
+		if err := pruner.Prune(); err != nil {
+			a.Log.Warning("%v", err)
+		}
+	}
 	if err := cache.RemoveIfEmpty(runDir); err != nil {
 		a.Log.Warning("%v", err)
 	}
@@ -101,7 +108,7 @@ func (a *Application) initialize() error {
 	}
 	a.Log.Field("Cache", "%s", a.Cache.Root)
 	a.Log.Field("Status", "ready")
-	if err := cleanup.Expired(a.Cache.Root, a.Now(), time.Hour, a.Log.Warning); err != nil {
+	if err := cleanup.Expired(a.Cache.Root, a.Now(), time.Hour, a.Log.Warning, cache.BlobDirName); err != nil {
 		return fmt.Errorf("clean expired cache: %w", err)
 	}
 	a.Log.Field("Cleanup", "expired cache removed")

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 )
 
@@ -34,7 +35,10 @@ func All(root string) (int, error) {
 	return removed, nil
 }
 
-func Expired(root string, now time.Time, maxAge time.Duration, warn WarningFunc) error {
+// Expired removes run directories under root older than maxAge. Directories
+// named in fileDirs are shared caches: only their files older than maxAge are
+// removed, so entries in active use survive.
+func Expired(root string, now time.Time, maxAge time.Duration, warn WarningFunc, fileDirs ...string) error {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -46,6 +50,11 @@ func Expired(root string, now time.Time, maxAge time.Duration, warn WarningFunc)
 		if !entry.IsDir() {
 			continue
 		}
+		path := filepath.Join(root, entry.Name())
+		if slices.Contains(fileDirs, entry.Name()) {
+			expireFiles(path, now, maxAge, warn)
+			continue
+		}
 		info, infoErr := entry.Info()
 		if infoErr != nil {
 			warn("inspect cache %s: %v", entry.Name(), infoErr)
@@ -54,10 +63,27 @@ func Expired(root string, now time.Time, maxAge time.Duration, warn WarningFunc)
 		if now.Sub(info.ModTime()) <= maxAge {
 			continue
 		}
-		path := filepath.Join(root, entry.Name())
 		if removeErr := os.RemoveAll(path); removeErr != nil {
 			warn("remove expired cache %s: %v", path, removeErr)
 		}
 	}
 	return nil
+}
+
+func expireFiles(dir string, now time.Time, maxAge time.Duration, warn WarningFunc) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		warn("read cache %s: %v", dir, err)
+		return
+	}
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil || now.Sub(info.ModTime()) <= maxAge {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		if err := os.RemoveAll(path); err != nil {
+			warn("remove expired cache %s: %v", path, err)
+		}
+	}
 }

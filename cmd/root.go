@@ -29,9 +29,10 @@ func Execute(ctx context.Context) int {
 		return 1
 	}
 	commandRunner := runner.ExecRunner{}
+	manager := cache.New(root)
 	application := &app.Application{
-		Cache:  cache.New(root),
-		Crane:  crane.Client{Progress: os.Stdout},
+		Cache:  manager,
+		Crane:  &crane.Client{CacheDir: manager.BlobDir(), Progress: os.Stdout},
 		Docker: docker.Client{Runner: commandRunner},
 		Log:    logger.New(os.Stdout),
 		Now:    time.Now,

@@ -6,8 +6,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	v1 "github.com/google/go-containerregistry/pkg/v1"
 )
 
 const (
@@ -29,22 +27,35 @@ type progressBar struct {
 	lastPercent int
 	total       int64
 	complete    int64
-	drawn       bool
-	dirty       bool
+	// reused counts bytes already on disk, which do not count towards speed.
+	reused int64
+	drawn  bool
+	dirty  bool
 }
 
 func newProgressBar(out io.Writer, now func() time.Time) *progressBar {
 	return &progressBar{out: out, terminal: isTerminal(out), now: now, started: now(), lastPercent: -1}
 }
 
-// consume renders every update until updates is closed.
-func (p *progressBar) consume(updates <-chan v1.Update) {
-	for update := range updates {
-		if update.Error != nil {
-			continue
-		}
-		p.update(update.Complete, update.Total)
+// reuse records bytes taken from the cache instead of downloaded.
+func (p *progressBar) reuse(size int64) {
+	p.reused += size
+	p.add(size)
+}
+
+// add records delta more (or, when negative, discarded) bytes.
+func (p *progressBar) add(delta int64) {
+	p.update(p.complete+delta, p.total)
+}
+
+// notice prints a message on its own line without breaking the bar.
+func (p *progressBar) notice(message string) {
+	if p.terminal && p.drawn {
+		_, _ = fmt.Fprint(p.out, "\r\033[K")
 	}
+	_, _ = fmt.Fprintf(p.out, "  %-10s %s\n", "Notice:", message)
+	p.lastDraw = time.Time{}
+	p.dirty = true
 }
 
 func (p *progressBar) update(complete, total int64) {
@@ -108,7 +119,7 @@ func (p *progressBar) speed() int64 {
 	if elapsed <= 0 {
 		return 0
 	}
-	return int64(float64(p.complete) / elapsed)
+	return int64(float64(p.complete-p.reused) / elapsed)
 }
 
 func formatBytes(value int64) string {

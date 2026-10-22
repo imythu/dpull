@@ -69,3 +69,35 @@ func TestAllRemovesFilesAndDirectories(t *testing.T) {
 		t.Fatalf("cache entries remain: %v", entries)
 	}
 }
+
+func TestExpiredRemovesOnlyOldFilesInSharedDirectories(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	now := time.Now()
+	blobs := filepath.Join(root, "blobs")
+	if err := os.Mkdir(blobs, 0o755); err != nil {
+		t.Fatalf("create blobs directory: %v", err)
+	}
+	oldPartial := filepath.Join(blobs, "sha256-old.partial")
+	freshPartial := filepath.Join(blobs, "sha256-fresh.partial")
+	for _, path := range []string{oldPartial, freshPartial} {
+		if err := os.WriteFile(path, []byte("data"), 0o600); err != nil {
+			t.Fatalf("create fixture file: %v", err)
+		}
+	}
+	oldTime := now.Add(-61 * time.Minute)
+	for _, path := range []string{oldPartial, blobs} {
+		if err := os.Chtimes(path, oldTime, oldTime); err != nil {
+			t.Fatalf("age %s: %v", path, err)
+		}
+	}
+	if err := Expired(root, now, time.Hour, t.Errorf, "blobs"); err != nil {
+		t.Fatalf("Expired() error = %v", err)
+	}
+	if _, err := os.Stat(oldPartial); !os.IsNotExist(err) {
+		t.Fatalf("expired partial still exists, stat error = %v", err)
+	}
+	if _, err := os.Stat(freshPartial); err != nil {
+		t.Fatalf("fresh partial removed: %v", err)
+	}
+}

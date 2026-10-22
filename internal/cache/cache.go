@@ -17,6 +17,15 @@ func New(root string) *Manager {
 	return &Manager{Root: root, Now: time.Now}
 }
 
+// BlobDirName is the shared layer cache directory under Root. Unlike run
+// directories it outlives a single run so failed downloads can be resumed.
+const BlobDirName = "blobs"
+
+// BlobDir returns the shared layer cache directory.
+func (m *Manager) BlobDir() string {
+	return filepath.Join(m.Root, BlobDirName)
+}
+
 func DefaultRoot() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

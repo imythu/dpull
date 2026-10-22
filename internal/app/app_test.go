@@ -30,6 +30,12 @@ type fakeRegistry struct {
 	calls   []string
 	fail    bool
 	options crane.Options
+	pruned  int
+}
+
+func (f *fakeRegistry) Prune() error {
+	f.pruned++
+	return nil
 }
 
 func (f *fakeRegistry) ImageID(_ context.Context, image string, options crane.Options) (string, error) {
@@ -113,13 +119,17 @@ func TestRunFallsBackToHostPlatform(t *testing.T) {
 func TestRunDoesNotStartComposeAfterImageFailure(t *testing.T) {
 	t.Parallel()
 	recorder := &selectiveRunner{}
-	application := testApplication(t, recorder, &fakeRegistry{fail: true})
+	registry := &fakeRegistry{fail: true}
+	application := testApplication(t, recorder, registry)
 	err := application.Run(context.Background(), Options{Images: []string{"nginx"}, Up: true})
 	if err == nil {
 		t.Fatal("Run() error = nil, want failure")
 	}
 	if len(recorder.commands) != 1 {
 		t.Fatalf("commands = %#v, want docker version only", recorder.commands)
+	}
+	if registry.pruned != 0 {
+		t.Fatal("Prune() called after a failure, want layers kept for retry")
 	}
 }
 
@@ -133,6 +143,9 @@ func TestRunLoadsAndRemovesArchive(t *testing.T) {
 	}
 	if len(recorder.commands) != 3 || len(registry.calls) != 2 {
 		t.Fatalf("commands = %#v, registry calls = %v", recorder.commands, registry.calls)
+	}
+	if registry.pruned != 1 {
+		t.Fatalf("Prune() calls = %d, want 1", registry.pruned)
 	}
 	entries, err := os.ReadDir(application.Cache.Root)
 	if err != nil {
